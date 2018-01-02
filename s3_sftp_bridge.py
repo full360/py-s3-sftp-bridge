@@ -4,7 +4,8 @@ import errno
 import json
 import os
 import sys
-
+import base64
+# import hashlib
 import boto3
 from botocore.client import Config
 from botocore.exceptions import ClientError
@@ -13,7 +14,10 @@ from botocore.exceptions import ClientError
 here = os.path.dirname(os.path.realpath(__file__))
 sys.path.append(os.path.join(here, "vendored"))
 
+import paramiko  # noqa: E402
 import pysftp  # noqa: E402
+import srvlookup  # noqa: E402
+from dns import resolver  # noqa: E402
 
 TMP_DIR = '/tmp'
 
@@ -28,6 +32,7 @@ def handler(event, context):
 
         response = {
             "statusCode": 200,
+
             "body": "Uploaded {}".format(s3_key)
         }
 
@@ -83,20 +88,54 @@ def _download_s3_object(s3_bucket, s3_key):
 
 
 def _upload_file(file_path):
-    host = os.environ['SFTP_HOST']
-    port = int(os.environ['SFTP_PORT'])
+
     user = os.environ['SFTP_USER']
-    s3_private_key = os.environ['SFTP_S3_SSH_KEY']
     sftp_location = os.environ['SFTP_LOCATION']
 
-    s3_ssh_key_bucket, s3_ssh_key_path = _split_s3_path(s3_private_key)
+    # Set Host and Port
+    host = os.environ['SFTP_HOST']
 
+    # get port number using consul dns lookup
+    my_resolver = resolver.Resolver()
+    srv = srvlookup._build_result_set(my_resolver.query(host, 'SRV'))
+
+    port = srv[0].port
+    print('Host and Port: {}:{}'.format(host, port))
+
+    # TODO memoize using port = int(os.environ['SFTP_PORT'])
+
+    # Download set private key for sftp server
+    s3_private_key = os.environ['SFTP_S3_SSH_KEY']
+    s3_ssh_key_bucket, s3_ssh_key_path = _split_s3_path(s3_private_key)
     _download_s3_object(s3_ssh_key_bucket, s3_ssh_key_path)
     private_key = '{}/{}'.format(TMP_DIR, s3_ssh_key_path)
+    print('Private Key {}'.format(private_key))
 
+    # Download set host key for sftp server
+    s3_host_key = os.environ['SFTP_S3_SSH_HOST_KEY']
+    s3_ssh_host_key_bucket, s3_ssh_host_key_path = _split_s3_path(s3_host_key)
+    _download_s3_object(s3_ssh_host_key_bucket, s3_ssh_host_key_path)
+    ssh_host_key = '{}/{}'.format(TMP_DIR, s3_ssh_host_key_path)
+    print('Host Key {}'.format(ssh_host_key))
+
+    # Setting Host Key
+    # not simple because there seems to be an issue with pysftp handling
+    # host keys when non-standard ports are involved
+    print('Setting cnopts')
     cnopts = pysftp.CnOpts()
-    cnopts.hostkeys = None
+    k = open(ssh_host_key, "r").read()
+    k = k.strip().split()[1].encode('ascii')
+    keydata = str.encode(k)
+    key = paramiko.RSAKey(data=base64.b64decode(keydata))
+    cnopts.hostkeys.clear()
+    hostname_without_port = host
+    print('Setting Host Key {}'.format(hostname_without_port))
+    cnopts.hostkeys.add(hostname_without_port, 'ssh-rsa', key)
+    hostname_with_port = "[{}]:{}".format(host, port)
+    print('Setting Host Key {}'.format(hostname_with_port))
+    cnopts.hostkeys.add(hostname_with_port, 'ssh-rsa', key)
 
+    # connect and put
     try:
         with pysftp.Connection(host=host, port=port,
                                username=user,
