@@ -1,6 +1,7 @@
 # Virtualenv and packages
 env/
 vendored/
+.cache
 
 # Compiled packages
 py-cryptography-1.7.2.zip
