@@ -14,7 +14,7 @@ variable "sftp_location" {}
 ###################################################################################################
 
 module "s3-sftp-bridge" {
-  source                       = github.com/tomelliff/py-s3-sftp-bridge//terraform/modules/s3-sftp-bridge_lambda?ref=terraform-v1"
+  source                       = "github.com/tomelliff/py-s3-sftp-bridge//terraform/modules/s3-sftp-bridge_lambda?ref=terraform-v1"
   integration_name             = "${var.integration_name}"
   lambda_function_package_path = "../../../../s3-sftp-bridge.zip"
 
