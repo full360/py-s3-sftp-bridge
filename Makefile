@@ -47,3 +47,13 @@ create_deploy_bucket:
 ship: docker
 	aws_account_id=`aws sts get-caller-identity --output text --query Account`; \
 	aws s3 cp $(PACKAGE_NAME) s3://$(DEPLOY_BUCKET_NAME)
+
+silent_docker: test Dockerfile
+	@docker run --rm \
+	-v $(shell pwd):/root \
+	$(shell docker build -q .) > ./build.log 2>&1
+
+terraform_zip: silent_docker
+	jq -n \
+  --arg zip_file `pwd`/s3-sftp-bridge.zip \
+        '{"zip_file":$zip_file}'
